@@ -1,4 +1,5 @@
 import streamlit as st
+
 from core.db import init_db
 
 st.set_page_config(

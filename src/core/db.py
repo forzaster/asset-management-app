@@ -6,6 +6,7 @@ from typing import Generator
 
 import pandas as pd
 
+
 def _s(v, default: str = "") -> str:
     """NaN / None を空文字に変換。"""
     if v is None:

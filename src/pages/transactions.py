@@ -1,5 +1,6 @@
 import io
 
+import pandas as pd
 import streamlit as st
 
 from core.db import query_df
@@ -8,7 +9,7 @@ st.title("📋 取引履歴")
 
 
 @st.cache_data(ttl=300)
-def load_all() -> "pd.DataFrame":
+def load_all() -> pd.DataFrame:
     return query_df("""
         SELECT trade_date, year, month, account_type, ticker_code, ticker_name,
                category, profit_type, trade_type, quantity,

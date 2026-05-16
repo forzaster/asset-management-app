@@ -4,7 +4,6 @@ import pandas as pd
 import streamlit as st
 
 from core.db import (
-    execute,
     get_db,
     import_holdings_csv,
     import_transactions_csv,
