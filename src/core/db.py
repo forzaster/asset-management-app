@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     tax          INTEGER DEFAULT 0,
     category     TEXT NOT NULL,
     year         INTEGER NOT NULL,
-    month        INTEGER NOT NULL DEFAULT 1
+    month        INTEGER NOT NULL DEFAULT 1,
+    acq_date     TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS holdings (
@@ -72,7 +73,7 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_transaction
-    ON transactions(account_type, ticker_code, ticker_name, trade_date, profit_type, sale_amount, cost_amount);
+    ON transactions(account_type, ticker_code, ticker_name, trade_date, profit_type, sale_amount, cost_amount, acq_date);
 
 CREATE INDEX IF NOT EXISTS idx_tx_year     ON transactions(year);
 CREATE INDEX IF NOT EXISTS idx_tx_category ON transactions(category);
@@ -104,6 +105,20 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
 def init_db() -> None:
     with get_db() as conn:
         conn.executescript(_SCHEMA)
+        # Migration: add acq_date column if it doesn't exist yet
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(transactions)")}
+        if "acq_date" not in cols:
+            conn.execute("ALTER TABLE transactions ADD COLUMN acq_date TEXT NOT NULL DEFAULT ''")
+        # Migration: rebuild UNIQUE INDEX to include acq_date
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(transactions)")}
+        if "uq_transaction" in indexes:
+            idx_info = conn.execute("SELECT sql FROM sqlite_master WHERE name='uq_transaction'").fetchone()
+            if idx_info and "acq_date" not in idx_info[0]:
+                conn.execute("DROP INDEX uq_transaction")
+                conn.execute(
+                    "CREATE UNIQUE INDEX uq_transaction ON transactions"
+                    "(account_type, ticker_code, ticker_name, trade_date, profit_type, sale_amount, cost_amount, acq_date)"
+                )
 
 
 def query_df(sql: str, params: tuple = ()) -> pd.DataFrame:
@@ -147,8 +162,8 @@ def import_transactions_csv(df: pd.DataFrame) -> dict:
             cur = conn.execute(
                 """INSERT OR IGNORE INTO transactions
                    (account_type, ticker_code, ticker_name, trade_date, trade_type, profit_type,
-                    quantity, sale_amount, cost_amount, profit_loss, tax, category, year, month)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    quantity, sale_amount, cost_amount, profit_loss, tax, category, year, month, acq_date)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     _s(r.get("account_type")),
                     _s(r.get("ticker_code")),
@@ -164,6 +179,7 @@ def import_transactions_csv(df: pd.DataFrame) -> dict:
                     _s(r.get("category")),
                     int(r["year"]),
                     int(r["month"]),
+                    _s(r.get("acq_date")),
                 ),
             )
             if cur.lastrowid and cur.rowcount:
