@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# docs
+docs/plans/*
+
+# DB
+**/*.db
+
+# 個人データ（CSVエクスポート）
+exports/
+
+# Claude Code
+.claude/
