@@ -15,8 +15,9 @@ docs/plans/*
 # DB
 **/*.db
 
-# 個人データ（CSVエクスポート）
+# 個人データ（CSVエクスポート・データ修正スクリプト）
 exports/
+scripts/
 
 # Claude Code
 .claude/
