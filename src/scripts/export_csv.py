@@ -18,6 +18,7 @@ TX_COLS = [
     "account_type", "ticker_code", "ticker_name", "trade_date",
     "trade_type", "profit_type", "quantity",
     "sale_amount", "cost_amount", "profit_loss", "tax", "category",
+    "year", "month", "acq_date",
 ]
 
 HOLDING_COLS = [
@@ -33,7 +34,7 @@ def export_transactions(conn: sqlite3.Connection) -> int:
     )
     before = len(df)
     df = df.drop_duplicates(
-        subset=["account_type", "ticker_code", "ticker_name", "trade_date", "profit_type", "sale_amount", "cost_amount"]
+        subset=["account_type", "ticker_code", "ticker_name", "trade_date", "profit_type", "sale_amount", "cost_amount", "acq_date"]
     )
     removed = before - len(df)
     df.to_csv(EXPORTS / "transactions.csv", index=False, encoding="utf-8-sig")
@@ -58,7 +59,7 @@ def clean_db_duplicates(conn: sqlite3.Connection) -> int:
         WHERE id NOT IN (
             SELECT MIN(id)
             FROM transactions
-            GROUP BY account_type, ticker_code, ticker_name, trade_date, profit_type, sale_amount, cost_amount
+            GROUP BY account_type, ticker_code, ticker_name, trade_date, profit_type, sale_amount, cost_amount, acq_date
         )
     """)
     removed = cur.rowcount

@@ -1,6 +1,7 @@
 import io
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 from core.db import query_df
@@ -30,18 +31,21 @@ with st.sidebar:
     accounts = sorted(df["account_type"].unique().tolist())
     cats     = sorted(df["category"].unique().tolist())
     ptypes   = sorted(df["profit_type"].unique().tolist())
+    ttypes   = sorted(df["trade_type"].unique().tolist())
 
     sel_years    = st.multiselect("年",       ["全て"] + [str(y) for y in years], default=["全て"])
     sel_accounts = st.multiselect("口座",     accounts, default=accounts)
     sel_cats     = st.multiselect("投資分類", cats,     default=cats)
     sel_ptypes   = st.multiselect("利益種別", ptypes,   default=ptypes)
+    sel_ttypes   = st.multiselect("取引種別", ttypes,   default=ttypes)
     keyword      = st.text_input("銘柄名検索", "")
 
 # Apply filters
 mask = (
     df["account_type"].isin(sel_accounts) &
     df["category"].isin(sel_cats) &
-    df["profit_type"].isin(sel_ptypes)
+    df["profit_type"].isin(sel_ptypes) &
+    df["trade_type"].isin(sel_ttypes)
 )
 if "全て" not in sel_years and sel_years:
     mask &= df["year"].astype(str).isin(sel_years)
@@ -106,3 +110,56 @@ st.download_button(
     file_name="transactions.csv",
     mime="text/csv",
 )
+
+st.divider()
+
+# ── 分析チャート ────────────────────────────────────────────────────────────────
+st.subheader("分析チャート")
+
+# カテゴリ別累積損益
+cat_pl = (
+    df_f.groupby("category")["profit_loss"]
+    .sum()
+    .reset_index()
+    .rename(columns={"profit_loss": "累積損益"})
+    .sort_values("累積損益", ascending=True)
+)
+fig_cat = px.bar(
+    cat_pl, x="累積損益", y="category", orientation="h",
+    title="カテゴリ別 累積損益",
+    labels={"category": "分類", "累積損益": "累積損益（円）"},
+    color="累積損益",
+    color_continuous_scale=["#E53935", "#BDBDBD", "#1565C0"],
+    color_continuous_midpoint=0,
+    height=max(250, len(cat_pl) * 40),
+)
+fig_cat.update_layout(
+    xaxis_tickformat=",.0f",
+    coloraxis_showscale=False,
+    yaxis_title="",
+)
+st.plotly_chart(fig_cat, use_container_width=True)
+
+# 銘柄別累積損益
+ticker_pl = (
+    df_f.groupby("ticker_name")["profit_loss"]
+    .sum()
+    .reset_index()
+    .rename(columns={"profit_loss": "累積損益"})
+    .sort_values("累積損益", ascending=True)
+)
+fig_ticker = px.bar(
+    ticker_pl, x="累積損益", y="ticker_name", orientation="h",
+    title="銘柄別 累積損益",
+    labels={"ticker_name": "銘柄名", "累積損益": "累積損益（円）"},
+    color="累積損益",
+    color_continuous_scale=["#E53935", "#BDBDBD", "#1565C0"],
+    color_continuous_midpoint=0,
+    height=max(400, len(ticker_pl) * 22),
+)
+fig_ticker.update_layout(
+    xaxis_tickformat=",.0f",
+    coloraxis_showscale=False,
+    yaxis_title="",
+)
+st.plotly_chart(fig_ticker, use_container_width=True)

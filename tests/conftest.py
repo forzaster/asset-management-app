@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     tax          INTEGER DEFAULT 0,
     category     TEXT NOT NULL,
     year         INTEGER NOT NULL,
-    month        INTEGER NOT NULL DEFAULT 1
+    month        INTEGER NOT NULL DEFAULT 1,
+    acq_date     TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS holdings (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
