@@ -23,28 +23,52 @@ st.title("📊 ホーム — 最新ステータス")
 def load_kpis():
     df = query_df("""
         SELECT year, profit_type, SUM(profit_loss) AS pl
-        FROM transactions GROUP BY year, profit_type
+        FROM transactions
+        WHERE category != '税金還付'
+        GROUP BY year, profit_type
+    """)
+    df_tax = query_df("""
+        SELECT year,
+               SUM(tax) AS annual_tax,
+               SUM(CASE WHEN category='税金還付' THEN profit_loss ELSE 0 END) AS annual_refund
+        FROM transactions
+        GROUP BY year
     """)
     total_pl   = int(df["pl"].sum())
     div_total  = int(df.loc[df["profit_type"] == "配当",  "pl"].sum())
     sell_total = int(df.loc[df["profit_type"] == "売却", "pl"].sum())
+    total_tax = int(df_tax["annual_tax"].sum() - df_tax["annual_refund"].sum())
+    total_net = total_pl - total_tax
 
     max_year = int(df["year"].max()) if not df.empty else datetime.now().year
     yr = df[df["year"] == max_year]
+    yr_tax_row = df_tax[df_tax["year"] == max_year]
     yr_pl   = int(yr["pl"].sum())
     yr_div  = int(yr.loc[yr["profit_type"] == "配当",  "pl"].sum())
     yr_sell = int(yr.loc[yr["profit_type"] == "売却", "pl"].sum())
-    return total_pl, div_total, sell_total, yr_pl, yr_div, yr_sell, max_year
+    yr_tax = int(yr_tax_row["annual_tax"].sum() - yr_tax_row["annual_refund"].sum())
+    yr_net = yr_pl - yr_tax
+    return (total_pl, div_total, sell_total, total_tax, total_net,
+            yr_pl, yr_div, yr_sell, yr_tax, yr_net, max_year)
 
-total_pl, div_total, sell_total, yr_pl, yr_div, yr_sell, max_year = load_kpis()
+(total_pl, div_total, sell_total, total_tax, total_net,
+ yr_pl, yr_div, yr_sell, yr_tax, yr_net, max_year) = load_kpis()
 
-c1, c2, c3, c4, c5, c6 = st.columns(6)
-c1.metric("累積損益合計",       f"¥{total_pl:,}")
-c2.metric("うち配当累計",       f"¥{div_total:,}")
-c3.metric("うち売却損益累計",   f"¥{sell_total:,}")
-c4.metric(f"{max_year}年 損益", f"¥{yr_pl:,}")
-c5.metric(f"{max_year}年 配当", f"¥{yr_div:,}")
-c6.metric(f"{max_year}年 売却", f"¥{yr_sell:,}")
+col_cum, col_yr = st.columns(2)
+with col_cum:
+    st.markdown("##### 累積")
+    st.metric("損益合計",     f"¥{total_pl:,}")
+    st.metric("配当累計",     f"¥{div_total:,}")
+    st.metric("売却損益累計", f"¥{sell_total:,}")
+    st.metric("税金累計",     f"¥{total_tax:,}")
+    st.metric("税引後損益",   f"¥{total_net:,}")
+with col_yr:
+    st.markdown(f"##### {max_year}年")
+    st.metric("損益",     f"¥{yr_pl:,}")
+    st.metric("配当",     f"¥{yr_div:,}")
+    st.metric("売却",     f"¥{yr_sell:,}")
+    st.metric("税金",     f"¥{yr_tax:,}")
+    st.metric("税引後損益", f"¥{yr_net:,}")
 
 st.divider()
 
@@ -54,7 +78,9 @@ st.divider()
 def load_category_summary():
     return query_df("""
         SELECT category, profit_type, SUM(profit_loss) AS pl
-        FROM transactions GROUP BY category, profit_type
+        FROM transactions
+        WHERE category != '税金還付'
+        GROUP BY category, profit_type
     """)
 
 df_cat = load_category_summary()
@@ -160,7 +186,7 @@ df_view["含み損益"] = df_view.apply(
 
 display_df = df_view[[
     "ticker_code", "ticker_name", "account_type", "category",
-    "quantity", "avg_cost", "現在値", "評価額", "含み損益", "yf_ticker",
+    "quantity", "avg_cost", "total_cost", "現在値", "評価額", "含み損益", "yf_ticker",
 ]].rename(columns={
     "ticker_code": "コード",
     "ticker_name": "銘柄名",
@@ -168,23 +194,55 @@ display_df = df_view[[
     "category":    "分類",
     "quantity":    "保有数量",
     "avg_cost":    "平均取得単価",
+    "total_cost":  "取得総額",
     "yf_ticker":   "YFティッカー",
 })
 
-st.dataframe(
-    display_df,
-    column_config={
-        "コード":       st.column_config.TextColumn(width="small"),
-        "銘柄名":       st.column_config.TextColumn(width="large"),
-        "口座":         st.column_config.TextColumn(width="small"),
-        "分類":         st.column_config.TextColumn(width="small"),
-        "保有数量":     st.column_config.NumberColumn(format="%.0f"),
-        "平均取得単価": st.column_config.NumberColumn(format="¥%.0f"),
-        "現在値":       st.column_config.NumberColumn(format="¥%.0f"),
-        "評価額":       st.column_config.NumberColumn(format="¥%.0f"),
-        "含み損益":     st.column_config.NumberColumn(format="¥%.0f"),
-        "YFティッカー": st.column_config.TextColumn(width="small"),
-    },
-    hide_index=True,
-    use_container_width=True,
-)
+# qty=0 (過去保有) は表示の見やすさのため折りたたみ
+show_zero = st.checkbox("保有数量 0 の銘柄も表示", value=True)
+if not show_zero:
+    display_df = display_df[display_df["保有数量"] > 0]
+
+# 口座 × 分類でグルーピングして個別テーブル表示
+ACCOUNT_ORDER = ["特定口座", "NISA"]
+CATEGORY_ORDER_LOCAL = ["日本株", "REIT", "外国株ETF", "外国株", "外国投信", "投資信託"]
+
+COL_CFG = {
+    "コード":       st.column_config.TextColumn(width="small"),
+    "銘柄名":       st.column_config.TextColumn(width="large"),
+    "保有数量":     st.column_config.NumberColumn(format="%.0f"),
+    "平均取得単価": st.column_config.NumberColumn(format="¥%.0f"),
+    "取得総額":     st.column_config.NumberColumn(format="¥%.0f"),
+    "現在値":       st.column_config.NumberColumn(format="¥%.0f"),
+    "評価額":       st.column_config.NumberColumn(format="¥%.0f"),
+    "含み損益":     st.column_config.NumberColumn(format="¥%.0f"),
+    "YFティッカー": st.column_config.TextColumn(width="small"),
+}
+
+# 口座でソート
+accs_present = [a for a in ACCOUNT_ORDER if a in display_df["口座"].unique()]
+accs_present += [a for a in display_df["口座"].unique() if a not in ACCOUNT_ORDER]
+
+for acc in accs_present:
+    df_acc = display_df[display_df["口座"] == acc]
+    if df_acc.empty:
+        continue
+    cats_present = [c for c in CATEGORY_ORDER_LOCAL if c in df_acc["分類"].unique()]
+    cats_present += [c for c in df_acc["分類"].unique() if c not in CATEGORY_ORDER_LOCAL]
+    for cat in cats_present:
+        df_grp = df_acc[df_acc["分類"] == cat].drop(columns=["口座", "分類"])
+        if df_grp.empty:
+            continue
+        # 小計
+        total_cost_sum = df_grp["取得総額"].sum()
+        valuation_sum = df_grp["評価額"].sum(skipna=True)
+        unrealized_sum = df_grp["含み損益"].sum(skipna=True)
+        st.markdown(f"##### {acc} ／ {cat} — {len(df_grp)}銘柄 "
+                    f"（取得総額 ¥{int(total_cost_sum):,} / 評価額 ¥{int(valuation_sum):,} / "
+                    f"含み損益 ¥{int(unrealized_sum):,}）")
+        st.dataframe(
+            df_grp,
+            column_config=COL_CFG,
+            hide_index=True,
+            use_container_width=True,
+        )

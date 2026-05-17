@@ -18,11 +18,25 @@ st.title("📈 利益推移")
 
 @st.cache_data(ttl=300)
 def load_annual():
+    """損益分類×年次の集計。税金還付（category='税金還付'）は損益から除外し、税金カラムに負値として netting する。"""
     return query_df("""
         SELECT year, category, profit_type, SUM(profit_loss) AS pl, SUM(tax) AS total_tax
         FROM transactions
+        WHERE category != '税金還付'
         GROUP BY year, category, profit_type
         ORDER BY year, category, profit_type
+    """)
+
+
+@st.cache_data(ttl=300)
+def load_refund_by_year():
+    """年ごとの税金還付額（譲渡益税還付金・配当所得税還付金の合計）。"""
+    return query_df("""
+        SELECT year, SUM(profit_loss) AS refund
+        FROM transactions
+        WHERE category = '税金還付'
+        GROUP BY year
+        ORDER BY year
     """)
 
 df = load_annual()
@@ -79,8 +93,11 @@ st.subheader("累積損益推移")
 
 @st.cache_data(ttl=300)
 def load_cumulative():
+    """年次の損益・税合計。税金還付（category='税金還付'）は損益から除外し、税から差し引く。"""
     return query_df("""
-        SELECT year, SUM(profit_loss) AS annual_pl, SUM(tax) AS annual_tax
+        SELECT year,
+               SUM(CASE WHEN category != '税金還付' THEN profit_loss ELSE 0 END) AS annual_pl,
+               SUM(tax) - SUM(CASE WHEN category = '税金還付' THEN profit_loss ELSE 0 END) AS annual_tax
         FROM transactions
         GROUP BY year ORDER BY year
     """)
@@ -126,8 +143,11 @@ pivot = df_f.pivot_table(
     index="year", columns="profit_type", values="pl", aggfunc="sum", fill_value=0
 ).reset_index()
 pivot["損益合計"] = pivot.drop(columns="year").sum(axis=1)
-tax_by_year = df_f.groupby("year")["total_tax"].sum().reset_index().rename(columns={"total_tax": "税金"})
-pivot = pivot.merge(tax_by_year, on="year", how="left").fillna(0)
+tax_by_year = df_f.groupby("year")["total_tax"].sum().reset_index().rename(columns={"total_tax": "tax_raw"})
+df_refund = load_refund_by_year()
+tax_by_year = tax_by_year.merge(df_refund, on="year", how="left").fillna(0)
+tax_by_year["税金"] = tax_by_year["tax_raw"] - tax_by_year["refund"]
+pivot = pivot.merge(tax_by_year[["year", "税金"]], on="year", how="left").fillna(0)
 pivot["税引後合計"] = pivot["損益合計"] - pivot["税金"]
 pivot = pivot.sort_values("year", ascending=False)
 
