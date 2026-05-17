@@ -1,3 +1,4 @@
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -10,8 +11,10 @@ CATEGORY_COLORS = {
     "外国株ETF": "#2ca02c",
     "REIT": "#d62728",
     "外国投信": "#9467bd",
+    "配当": "#4CAF50",
+    "税金": "#E57373",
 }
-CATEGORY_ORDER = ["日本株", "REIT", "外国株ETF", "外国投信", "投資信託"]
+CATEGORY_ORDER = ["日本株", "REIT", "外国株ETF", "外国投信", "投資信託", "配当", "税金"]
 
 st.title("📈 利益推移")
 
@@ -54,6 +57,7 @@ with st.sidebar:
     sel_years = st.slider("年範囲", min(all_years), max(all_years),
                           (min(all_years), max(all_years)))
     sel_ptypes = st.multiselect("利益種別", ["配当", "売却"], default=["配当", "売却"])
+    show_tax = st.checkbox("税金（マイナス側）を表示", value=True)
 
 mask = (
     df["category"].isin(sel_cats) &
@@ -62,22 +66,59 @@ mask = (
 )
 df_f = df[mask].copy()
 
-# ── 年次損益推移チャート (stacked bar, faceted by profit_type) ─────────────────
+# 年次推移チャート用に「税金」（負値）の擬似レコードを追加
+def build_chart_df(df_filtered: pd.DataFrame) -> pd.DataFrame:
+    if not show_tax:
+        return df_filtered
+    # 年ごとの税 net (税徴収 - 還付金)
+    tax_rows = query_df("""
+        SELECT year,
+               SUM(CASE WHEN category != '税金還付' THEN tax ELSE 0 END) -
+               SUM(CASE WHEN category = '税金還付' THEN profit_loss ELSE 0 END) AS tax_net
+        FROM transactions GROUP BY year
+    """)
+    tax_rows = tax_rows[tax_rows["year"].between(*sel_years)].copy()
+    tax_rows = tax_rows[tax_rows["tax_net"] != 0]
+    if tax_rows.empty:
+        return df_filtered
+    extra = pd.DataFrame({
+        "year": tax_rows["year"],
+        "category": "税金",
+        "profit_type": "税金",
+        "pl": -tax_rows["tax_net"],
+        "total_tax": 0,
+    })
+    return pd.concat([df_filtered, extra], ignore_index=True)
+
+
+df_chart = build_chart_df(df_f)
+
+# ── 年次損益推移チャート（投資分類別、配当・税金も並列カテゴリとして表示） ──────
 st.subheader("年次損益推移（投資分類別）")
 
-if df_f.empty:
+if df_chart.empty:
     st.info("条件に合うデータがありません")
 else:
-    cat_order_filtered = [c for c in CATEGORY_ORDER if c in sel_cats]
+    # 配当は category='配当' に統合（投資分類別ではなく1カテゴリとして表示）
+    df_plot = df_chart.copy()
+    df_plot.loc[df_plot["profit_type"] == "配当", "category"] = "配当"
+    df_plot = df_plot.groupby(["year", "category"])["pl"].sum().reset_index()
+
+    extra_cats = []
+    if "配当" in df_plot["category"].unique():
+        extra_cats.append("配当")
+    if show_tax and "税金" in df_plot["category"].unique():
+        extra_cats.append("税金")
+    cat_order_filtered = [c for c in CATEGORY_ORDER if c in sel_cats] + extra_cats
+
     fig = px.bar(
-        df_f,
+        df_plot,
         x="year", y="pl", color="category",
-        facet_col="profit_type",
-        barmode="stack",
+        barmode="relative",
         color_discrete_map=CATEGORY_COLORS,
-        category_orders={"category": cat_order_filtered, "profit_type": sel_ptypes},
-        labels={"pl": "損益（円）", "year": "年", "category": "分類", "profit_type": "種別"},
-        height=420,
+        category_orders={"category": cat_order_filtered},
+        labels={"pl": "損益（円）", "year": "年", "category": "分類"},
+        height=440,
     )
     fig.update_layout(
         yaxis_tickformat=",.0f",
@@ -85,7 +126,6 @@ else:
         legend_title="投資分類",
     )
     fig.add_hline(y=0, line_dash="dash", line_color="gray", line_width=1)
-    fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
     st.plotly_chart(fig, use_container_width=True)
 
 # ── 累積損益推移チャート ──────────────────────────────────────────────────────────
