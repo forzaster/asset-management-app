@@ -5,6 +5,7 @@ import pytest
 
 from core.db import (
     _s,
+    fill_ticker_codes_from_text,
     import_holdings_csv,
     import_tokutei_csv_text,
     import_transactions_csv,
@@ -214,3 +215,25 @@ def test_sync_refund_from_text_idempotent(tmp_db: object) -> None:
     sync_refund_from_text(SAMPLE_REFUND_CSV)
     result2 = sync_refund_from_text(SAMPLE_REFUND_CSV)
     assert result2["inserted"] >= 1  # 削除して再投入なので毎回1以上
+
+
+# ── fill_ticker_codes_from_text ───────────────────────────────────────────────
+
+SAMPLE_CODE_CSV = """\
+2024,,,,,,,,,,,,,,
+1234,テスト株式会社,,,現物売,2024/01/15,2024/01/17,,,,,,,100000,,
+""".lstrip()
+
+
+def test_fill_ticker_codes_from_text(tmp_db: object) -> None:
+    import core.db as db_module
+    with db_module.get_db() as conn:
+        conn.execute(
+            "INSERT INTO transactions (account_type, ticker_code, ticker_name, trade_date, "
+            "trade_type, profit_type, quantity, sale_amount, cost_amount, profit_loss, tax, "
+            "category, year, month, acq_date) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("特定口座", "", "テスト株式会社", "2024-01-15", "現物売", "売却",
+             "", 0, 0, 100000, 0, "日本株", 2024, 1, ""),
+        )
+    result = fill_ticker_codes_from_text(SAMPLE_CODE_CSV)
+    assert result["updated"] >= 1

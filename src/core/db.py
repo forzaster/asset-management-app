@@ -598,6 +598,52 @@ def sync_refund_from_text(text: str) -> dict:
     return {"deleted": deleted, "inserted": inserted}
 
 
+_MANUAL_TICKER_MAP: dict[str, str] = {}
+
+
+def fill_ticker_codes_from_text(text: str) -> dict:
+    """CSVテキストの銘柄コード/銘柄名マッピングと MANUAL_MAP を使って
+    transactions.ticker_code の空欄を埋める。
+    戻り値: {"updated": N, "unmapped": [銘柄名, ...]}
+    """
+    from collections import Counter
+    mapping: dict[str, Counter[str]] = {}
+    for row in _csv.reader(text.splitlines()):
+        if len(row) < 2:
+            continue
+        c0, c1 = row[0].strip(), row[1].strip()
+        if not c0 or not c1:
+            continue
+        if c0 in _TAX_LABELS or c1 in _TAX_LABELS:
+            continue
+        if _re.match(r"^.+total$", c0) or c1 == "銘柄":
+            continue
+        if _re.match(r"^\d{4}$", c0) or _re.match(r"^[A-Z]+$", c0):
+            mapping.setdefault(c1, Counter())[c0] += 1
+
+    csv_map = {name: c.most_common(1)[0][0] for name, c in mapping.items()}
+    final_map = {**_MANUAL_TICKER_MAP, **csv_map}
+
+    updated = 0
+    unmapped: list[str] = []
+    with get_db() as conn:
+        for row in conn.execute(
+            "SELECT DISTINCT ticker_name FROM transactions WHERE ticker_code = ''"
+        ).fetchall():
+            name = row[0]
+            code = final_map.get(name)
+            if code:
+                cur = conn.execute(
+                    "UPDATE transactions SET ticker_code=? WHERE ticker_name=? AND ticker_code=''",
+                    (code, name),
+                )
+                updated += cur.rowcount
+            else:
+                unmapped.append(name)
+
+    return {"updated": updated, "unmapped": unmapped}
+
+
 def import_holdings_csv(df: pd.DataFrame) -> dict:
     """保有銘柄をUPSERT（ticker_name + account_type が一致すれば値を更新）。"""
     missing = _HOLDING_REQUIRED_COLS - set(df.columns)
