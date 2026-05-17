@@ -3,7 +3,15 @@ import sqlite3
 import pandas as pd
 import pytest
 
-from core.db import _s, import_holdings_csv, import_transactions_csv
+from core.db import (
+    _s,
+    fill_ticker_codes_from_text,
+    import_holdings_csv,
+    import_tokutei_csv_text,
+    import_transactions_csv,
+    sync_refund_from_text,
+    sync_tax_from_text,
+)
 
 # ── _s ヘルパー ───────────────────────────────────────────────────────────────
 
@@ -143,3 +151,89 @@ class TestImportHoldingsCsv:
         count = conn.execute("SELECT COUNT(*) FROM holdings").fetchone()[0]
         conn.close()
         assert count == 0
+
+
+# ── import_tokutei_csv_text ───────────────────────────────────────────────────
+
+SAMPLE_TOKUTEI_CSV = """\
+2024,,,,,,,,,,,,,,
+,銘柄,,,,,,,,,,,,,
+1234,テスト株式会社,,,現物売,2024/01/15,2024/01/17,100,,500000,400000,,100000,,
+""".lstrip()
+
+
+def test_import_tokutei_csv_text_inserts(tmp_db: object) -> None:
+    result = import_tokutei_csv_text(SAMPLE_TOKUTEI_CSV)
+    assert result["inserted"] >= 1
+    assert result["updated"] >= 0
+
+
+def test_import_tokutei_csv_text_idempotent(tmp_db: object) -> None:
+    import_tokutei_csv_text(SAMPLE_TOKUTEI_CSV)
+    result2 = import_tokutei_csv_text(SAMPLE_TOKUTEI_CSV)
+    assert result2["inserted"] == 0  # 2回目は重複スキップ
+
+
+# ── sync_tax_from_text ────────────────────────────────────────────────────────
+
+SAMPLE_TAX_CSV = """\
+2024,,,,,,,,,,,,,,
+,銘柄,,,,,,,,,,,,,
+1234,テスト株式会社,,,現物売,2024/01/15,2024/01/17,100,,500000,400000,,100000,,
+譲渡益税徴収額,,,,,2024/01/17,,,,,,15315,3084,,
+""".lstrip()
+
+
+def test_sync_tax_from_text_updates(tmp_db: object) -> None:
+    import_tokutei_csv_text(SAMPLE_TAX_CSV)
+    result = sync_tax_from_text(SAMPLE_TAX_CSV)
+    assert result["updated"] >= 1
+
+
+def test_sync_tax_from_text_idempotent(tmp_db: object) -> None:
+    import_tokutei_csv_text(SAMPLE_TAX_CSV)
+    sync_tax_from_text(SAMPLE_TAX_CSV)
+    result2 = sync_tax_from_text(SAMPLE_TAX_CSV)
+    assert result2["updated"] >= 0
+
+
+# ── sync_refund_from_text ─────────────────────────────────────────────────────
+
+SAMPLE_REFUND_CSV = """\
+2024,,,,,,,,,,,,,,
+,銘柄,,,,,,,,,,,,,
+譲渡益税還付金,,,,,2024/03/20,,,,,,12345,2469,,
+""".lstrip()
+
+
+def test_sync_refund_from_text_inserts(tmp_db: object) -> None:
+    result = sync_refund_from_text(SAMPLE_REFUND_CSV)
+    assert result["inserted"] >= 1
+
+
+def test_sync_refund_from_text_idempotent(tmp_db: object) -> None:
+    sync_refund_from_text(SAMPLE_REFUND_CSV)
+    result2 = sync_refund_from_text(SAMPLE_REFUND_CSV)
+    assert result2["inserted"] >= 1  # 削除して再投入なので毎回1以上
+
+
+# ── fill_ticker_codes_from_text ───────────────────────────────────────────────
+
+SAMPLE_CODE_CSV = """\
+2024,,,,,,,,,,,,,,
+1234,テスト株式会社,,,現物売,2024/01/15,2024/01/17,,,,,,,100000,,
+""".lstrip()
+
+
+def test_fill_ticker_codes_from_text(tmp_db: object) -> None:
+    import core.db as db_module
+    with db_module.get_db() as conn:
+        conn.execute(
+            "INSERT INTO transactions (account_type, ticker_code, ticker_name, trade_date, "
+            "trade_type, profit_type, quantity, sale_amount, cost_amount, profit_loss, tax, "
+            "category, year, month, acq_date) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("特定口座", "", "テスト株式会社", "2024-01-15", "現物売", "売却",
+             "", 0, 0, 100000, 0, "日本株", 2024, 1, ""),
+        )
+    result = fill_ticker_codes_from_text(SAMPLE_CODE_CSV)
+    assert result["updated"] >= 1
