@@ -148,18 +148,51 @@ ticker_pl = (
     .rename(columns={"profit_loss": "累積損益"})
     .sort_values("累積損益", ascending=True)
 )
-fig_ticker = px.bar(
-    ticker_pl, x="累積損益", y="ticker_name", orientation="h",
-    title="銘柄別 累積損益",
+
+# Top10 (利益) と Worst10 (損失) を抽出
+top10 = ticker_pl.nlargest(10, "累積損益")
+worst10 = ticker_pl.nsmallest(10, "累積損益")
+top_worst = (
+    pd.concat([top10, worst10])
+    .drop_duplicates(subset=["ticker_name"])
+    .sort_values("累積損益", ascending=True)
+)
+fig_top = px.bar(
+    top_worst, x="累積損益", y="ticker_name", orientation="h",
+    title="銘柄別 累積損益 — Top10 / Worst10",
     labels={"ticker_name": "銘柄名", "累積損益": "累積損益（円）"},
     color="累積損益",
     color_continuous_scale=["#E53935", "#BDBDBD", "#1565C0"],
     color_continuous_midpoint=0,
-    height=max(400, len(ticker_pl) * 22),
+    text="累積損益",
+    height=max(450, len(top_worst) * 28),
 )
-fig_ticker.update_layout(
+fig_top.update_traces(
+    texttemplate="¥%{text:,.0f}",
+    textposition="outside",
+    cliponaxis=False,
+)
+fig_top.update_layout(
     xaxis_tickformat=",.0f",
     coloraxis_showscale=False,
     yaxis_title="",
+    margin=dict(l=10, r=80, t=50, b=10),
 )
-st.plotly_chart(fig_ticker, use_container_width=True)
+st.plotly_chart(fig_top, use_container_width=True)
+
+# 全銘柄の累積損益 (折りたたみ)
+with st.expander(f"全銘柄の累積損益 ({len(ticker_pl)} 件)", expanded=False):
+    fig_ticker = px.bar(
+        ticker_pl, x="累積損益", y="ticker_name", orientation="h",
+        labels={"ticker_name": "銘柄名", "累積損益": "累積損益（円）"},
+        color="累積損益",
+        color_continuous_scale=["#E53935", "#BDBDBD", "#1565C0"],
+        color_continuous_midpoint=0,
+        height=max(400, len(ticker_pl) * 22),
+    )
+    fig_ticker.update_layout(
+        xaxis_tickformat=",.0f",
+        coloraxis_showscale=False,
+        yaxis_title="",
+    )
+    st.plotly_chart(fig_ticker, use_container_width=True)
