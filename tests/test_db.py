@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 import pytest
 
-from core.db import _s, import_holdings_csv, import_transactions_csv
+from core.db import _s, import_holdings_csv, import_tokutei_csv_text, import_transactions_csv
 
 # ── _s ヘルパー ───────────────────────────────────────────────────────────────
 
@@ -143,3 +143,24 @@ class TestImportHoldingsCsv:
         count = conn.execute("SELECT COUNT(*) FROM holdings").fetchone()[0]
         conn.close()
         assert count == 0
+
+
+# ── import_tokutei_csv_text ───────────────────────────────────────────────────
+
+SAMPLE_TOKUTEI_CSV = """\
+2024,,,,,,,,,,,,,,
+,銘柄,,,,,,,,,,,,,
+1234,テスト株式会社,,,現物売,2024/01/15,2024/01/17,100,,500000,400000,,100000,,
+""".lstrip()
+
+
+def test_import_tokutei_csv_text_inserts(tmp_db: object) -> None:
+    result = import_tokutei_csv_text(SAMPLE_TOKUTEI_CSV)
+    assert result["inserted"] >= 1
+    assert result["updated"] >= 0
+
+
+def test_import_tokutei_csv_text_idempotent(tmp_db: object) -> None:
+    import_tokutei_csv_text(SAMPLE_TOKUTEI_CSV)
+    result2 = import_tokutei_csv_text(SAMPLE_TOKUTEI_CSV)
+    assert result2["inserted"] == 0  # 2回目は重複スキップ

@@ -1,7 +1,10 @@
 import contextlib
+import csv as _csv
 import math
 import pathlib
+import re as _re
 import sqlite3
+from collections import defaultdict as _defaultdict
 from typing import Generator
 
 import pandas as pd
@@ -187,6 +190,186 @@ def import_transactions_csv(df: pd.DataFrame) -> dict:
             else:
                 skipped += 1
     return {"inserted": inserted, "skipped": skipped}
+
+
+_TRADE_TYPE_MAP = {
+    "現物売": ("売却", "日本株"),
+    "株式現物売": ("売却", "日本株"),
+    "株式配当金": ("配当", "日本株"),
+    "投信分配金": ("配当", "投資信託"),
+    "国内投信解約": ("売却", "投資信託"),
+    "外国株式売": ("売却", "外国株"),
+    "外国株式配当金": ("配当", "外国株"),
+    "外国投信分配金": ("配当", "外国投信"),
+    "資本剰余金配当/みなし譲渡": ("配当", "日本株"),
+}
+
+
+_TAX_LABELS = {"譲渡益税徴収額", "配当所得税徴収額", "譲渡益税還付金", "配当所得税還付金"}
+_REFUND_LABELS = {"譲渡益税還付金", "配当所得税還付金"}
+
+
+def _parse_date_tokutei(s: str) -> str:
+    if not s or s.strip() in ("", "--", "----/--/--"):
+        return ""
+    s = s.strip()
+    if "~" in s:
+        s = s.split("~")[0].strip()
+    m = _re.match(r"^(\d{4})/(\d{1,2})/(\d{1,2})$", s)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return ""
+
+
+def _parse_int_tokutei(s: str) -> int:
+    if not s or s.strip() in ("", "--"):
+        return 0
+    try:
+        return int(s.replace(",", "").strip())
+    except ValueError:
+        return 0
+
+
+def _parse_lots_from_text(text: str, conn: sqlite3.Connection) -> list[dict]:
+    """CSVテキストから取引ロットのリストを返す。
+
+    特定口座損益CSVの列構成（0始まり）:
+      0: 銘柄コード, 1: 銘柄名, 2: (空), 3: (空), 4: 取引種別,
+      5: 約定日, 6: 受渡日, 7: 数量, 8: (空), 9: 売却/受取金額,
+      10: 取得費, 11: (空), 12: 損益, 13: 取得日, 14: (空)
+    """
+    lots = []
+    current_year = None
+    for row in _csv.reader(text.splitlines()):
+        if len(row) < 13:
+            row = row + [""] * (13 - len(row))
+        # Pad to at least 15 for safety
+        while len(row) < 15:
+            row.append("")
+        c0, c1 = row[0].strip(), row[1].strip()
+        c4 = row[4].strip()   # 取引種別
+        c5 = row[5].strip()   # 約定日
+        c6 = row[6].strip()   # 受渡日
+        c7 = row[7].strip()   # 数量
+        c9 = row[9].strip()   # 売却/受取金額
+        c10 = row[10].strip() # 取得費
+        c12 = row[12].strip() # 損益
+        c13 = row[13].strip() # 取得日
+
+        # Year header row: c0 is 4-digit year, rest empty
+        m = _re.match(r"^(\d{4})$", c0)
+        if m and not c4:
+            current_year = int(m.group(1))
+            continue
+        # Skip total rows
+        if _re.match(r"^.+total$", c0, _re.IGNORECASE):
+            continue
+        # Skip tax/refund rows
+        if c0 in _TAX_LABELS or c1 in _TAX_LABELS:
+            continue
+        # Skip header row
+        if c1 == "銘柄":
+            continue
+        # Skip rows without required fields
+        if current_year is None or not c1 or not c4 or not c12:
+            continue
+        if c4 not in _TRADE_TYPE_MAP:
+            continue
+
+        profit_type, default_cat = _TRADE_TYPE_MAP[c4]
+        r = conn.execute(
+            "SELECT category FROM transactions WHERE account_type='特定口座' AND ticker_name=? "
+            "GROUP BY category ORDER BY COUNT(*) DESC LIMIT 1", (c1,)
+        ).fetchone()
+        category = r[0] if r else default_cat
+
+        try:
+            pl = int(c12.replace(",", ""))
+        except ValueError:
+            continue
+
+        trade_date = _parse_date_tokutei(c5) or _parse_date_tokutei(c6)
+        if not trade_date:
+            continue
+
+        qty = c7.strip()
+        if qty in ("", "--", "----"):
+            qty = ""
+
+        lots.append({
+            "ticker_name": c1,
+            "trade_type": c4,
+            "profit_type": profit_type,
+            "category": category,
+            "trade_date": trade_date,
+            "settle_date": _parse_date_tokutei(c6),
+            "qty": qty,
+            "sale": _parse_int_tokutei(c9),
+            "cost": _parse_int_tokutei(c10),
+            "pl": pl,
+            "acq_date": _parse_date_tokutei(c13),
+            "year": int(trade_date[:4]),
+            "month": int(trade_date[5:7]),
+        })
+    return lots
+
+
+def import_tokutei_csv_text(text: str) -> dict:
+    """特定口座損益CSVのテキストをDBに同期する。
+    戻り値: {"inserted": N, "updated": N, "matched_existing": N, "total_lots": N}
+    """
+    with get_db() as conn:
+        lots = _parse_lots_from_text(text, conn)
+        csv_by_key: dict[tuple, list[dict]] = _defaultdict(list)
+        for lot in lots:
+            key = (lot["ticker_name"], lot["trade_date"], lot["sale"], lot["cost"])
+            csv_by_key[key].append(lot)
+
+        updated = 0
+        inserted = 0
+        matched_existing = 0
+
+        for key, csv_lots in csv_by_key.items():
+            ticker, trade_date, sale, cost = key
+            db_rows = conn.execute(
+                """SELECT id, acq_date FROM transactions
+                   WHERE account_type='特定口座' AND ticker_name=? AND trade_date=?
+                     AND sale_amount=? AND cost_amount=?""",
+                (ticker, trade_date, sale, cost),
+            ).fetchall()
+            db_filled = [r for r in db_rows if r[1]]
+            db_empty  = [r for r in db_rows if not r[1]]
+
+            filled_acq = {r[1] for r in db_filled}
+            remaining = [lot for lot in csv_lots if lot["acq_date"] not in filled_acq]
+            matched_existing += len(csv_lots) - len(remaining)
+
+            n_update = min(len(db_empty), len(remaining))
+            for i in range(n_update):
+                lot = remaining[i]
+                conn.execute(
+                    "UPDATE transactions SET acq_date=?, quantity=?, trade_type=?, "
+                    "profit_type=?, category=? WHERE id=?",
+                    (lot["acq_date"], lot["qty"], lot["trade_type"], lot["profit_type"],
+                     lot["category"], db_empty[i][0]),
+                )
+                updated += 1
+
+            for lot in remaining[n_update:]:
+                cur = conn.execute(
+                    """INSERT OR IGNORE INTO transactions
+                       (account_type, ticker_code, ticker_name, trade_date, trade_type, profit_type,
+                        quantity, sale_amount, cost_amount, profit_loss, tax, category, year, month, acq_date)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ("特定口座", "", lot["ticker_name"], lot["trade_date"], lot["trade_type"],
+                     lot["profit_type"], lot["qty"], lot["sale"], lot["cost"], lot["pl"], 0,
+                     lot["category"], lot["year"], lot["month"], lot["acq_date"]),
+                )
+                if cur.rowcount:
+                    inserted += 1
+
+    return {"inserted": inserted, "updated": updated, "matched_existing": matched_existing,
+            "total_lots": len(lots)}
 
 
 def import_holdings_csv(df: pd.DataFrame) -> dict:
