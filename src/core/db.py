@@ -598,11 +598,8 @@ def sync_refund_from_text(text: str) -> dict:
     return {"deleted": deleted, "inserted": inserted}
 
 
-_MANUAL_TICKER_MAP: dict[str, str] = {}
-
-
 def fill_ticker_codes_from_text(text: str) -> dict:
-    """CSVテキストの銘柄コード/銘柄名マッピングと MANUAL_MAP を使って
+    """CSVテキストの銘柄コード/銘柄名マッピングを使って
     transactions.ticker_code の空欄を埋める。
     戻り値: {"updated": N, "unmapped": [銘柄名, ...]}
     """
@@ -621,8 +618,7 @@ def fill_ticker_codes_from_text(text: str) -> dict:
         if _re.match(r"^\d{4}$", c0) or _re.match(r"^[A-Z]+$", c0):
             mapping.setdefault(c1, Counter())[c0] += 1
 
-    csv_map = {name: c.most_common(1)[0][0] for name, c in mapping.items()}
-    final_map = {**_MANUAL_TICKER_MAP, **csv_map}
+    final_map = {name: c.most_common(1)[0][0] for name, c in mapping.items()}
 
     updated = 0
     unmapped: list[str] = []
