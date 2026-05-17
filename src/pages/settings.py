@@ -4,13 +4,86 @@ import pandas as pd
 import streamlit as st
 
 from core.db import (
+    fill_ticker_codes_from_text,
     get_db,
     import_holdings_csv,
+    import_tokutei_csv_text,
     import_transactions_csv,
     query_df,
+    sync_refund_from_text,
+    sync_tax_from_text,
 )
 
-st.title("⚙️ 設定")
+st.title("🗄️ データ管理")
+
+
+# ── 特定口座損益CSVインポート ─────────────────────────────────────────────────
+st.subheader("特定口座損益CSVインポート")
+st.caption(
+    "証券会社からダウンロードした「特定口座損益.csv」をそのままアップロードしてください。"
+    "取引インポート・税額同期・還付金同期・銘柄コード補完を一括実行します。"
+)
+
+tokutei_file = st.file_uploader(
+    "特定口座損益.csv を選択", type="csv", key="tokutei_uploader"
+)
+
+if tokutei_file is not None:
+    try:
+        text = tokutei_file.read().decode("utf-8")
+    except UnicodeDecodeError:
+        tokutei_file.seek(0)
+        text = tokutei_file.read().decode("cp932", errors="replace")
+
+    import csv as _csv_ui
+
+    lot_count = sum(
+        1
+        for row in _csv_ui.reader(text.splitlines())
+        if len(row) >= 5
+        and row[4].strip()
+        in {
+            "現物売",
+            "株式現物売",
+            "株式配当金",
+            "投信分配金",
+            "国内投信解約",
+            "外国株式売",
+            "外国株式配当金",
+            "外国投信分配金",
+            "資本剰余金配当/みなし譲渡",
+        }
+    )
+    tax_count = sum(
+        1
+        for row in _csv_ui.reader(text.splitlines())
+        if len(row) >= 1 and row[0].strip() in {"譲渡益税徴収額", "配当所得税徴収額"}
+    )
+    refund_count = sum(
+        1
+        for row in _csv_ui.reader(text.splitlines())
+        if len(row) >= 1 and row[0].strip() in {"譲渡益税還付金", "配当所得税還付金"}
+    )
+    st.info(
+        f"検出: 取引 **{lot_count:,}** 件 / 税徴収行 **{tax_count:,}** 件 / 還付金 **{refund_count:,}** 件"
+    )
+
+    if st.button("📥 一括インポート実行", type="primary", key="tokutei_import"):
+        with st.spinner("実行中…"):
+            r1 = import_tokutei_csv_text(text)
+            r2 = sync_tax_from_text(text)
+            r3 = sync_refund_from_text(text)
+            r4 = fill_ticker_codes_from_text(text)
+        st.success("完了しました")
+        st.markdown(
+            f"- **ステップ1 取引インポート:** 追加 {r1['inserted']:,} 件 / acq_date更新 {r1['updated']:,} 件 / 整合済み {r1['matched_existing']:,} 件\n"
+            f"- **ステップ2 税額同期:** 更新 {r2['updated']:,} 件\n"
+            f"- **ステップ3 還付金同期:** 追加 {r3['inserted']:,} 件\n"
+            f"- **ステップ4 銘柄コード補完:** 更新 {r4['updated']:,} 件"
+        )
+        st.cache_data.clear()
+
+st.divider()
 
 
 # ── 取引履歴 CSVインポート ──────────────────────────────────────────────────────
