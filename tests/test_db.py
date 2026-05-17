@@ -3,7 +3,13 @@ import sqlite3
 import pandas as pd
 import pytest
 
-from core.db import _s, import_holdings_csv, import_tokutei_csv_text, import_transactions_csv
+from core.db import (
+    _s,
+    import_holdings_csv,
+    import_tokutei_csv_text,
+    import_transactions_csv,
+    sync_tax_from_text,
+)
 
 # ── _s ヘルパー ───────────────────────────────────────────────────────────────
 
@@ -164,3 +170,26 @@ def test_import_tokutei_csv_text_idempotent(tmp_db: object) -> None:
     import_tokutei_csv_text(SAMPLE_TOKUTEI_CSV)
     result2 = import_tokutei_csv_text(SAMPLE_TOKUTEI_CSV)
     assert result2["inserted"] == 0  # 2回目は重複スキップ
+
+
+# ── sync_tax_from_text ────────────────────────────────────────────────────────
+
+SAMPLE_TAX_CSV = """\
+2024,,,,,,,,,,,,,,
+,銘柄,,,,,,,,,,,,,
+1234,テスト株式会社,,,現物売,2024/01/15,2024/01/17,100,,500000,400000,,100000,,
+譲渡益税徴収額,,,,,2024/01/17,,,,,,15315,3084,,
+""".lstrip()
+
+
+def test_sync_tax_from_text_updates(tmp_db: object) -> None:
+    import_tokutei_csv_text(SAMPLE_TAX_CSV)
+    result = sync_tax_from_text(SAMPLE_TAX_CSV)
+    assert result["updated"] >= 1
+
+
+def test_sync_tax_from_text_idempotent(tmp_db: object) -> None:
+    import_tokutei_csv_text(SAMPLE_TAX_CSV)
+    sync_tax_from_text(SAMPLE_TAX_CSV)
+    result2 = sync_tax_from_text(SAMPLE_TAX_CSV)
+    assert result2["updated"] >= 0

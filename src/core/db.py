@@ -372,6 +372,170 @@ def import_tokutei_csv_text(text: str) -> dict:
             "total_lots": len(lots)}
 
 
+_TAX_LABELS_SALE = {"譲渡益税徴収額"}
+_TAX_LABELS_DIV  = {"配当所得税徴収額"}
+_TAX_LABELS_SKIP = {"譲渡益税還付金", "配当所得税還付金"}
+_SELL_TRADE_TYPES = {"現物売", "株式現物売", "国内投信解約", "外国株式売"}
+_DIV_TRADE_TYPES  = {"株式配当金", "投信分配金", "外国株式配当金", "外国投信分配金",
+                      "資本剰余金配当/みなし譲渡"}
+
+
+def sync_tax_from_text(text: str) -> dict:
+    """CSVテキストから税額を解析し、既存トランザクションの tax カラムを更新する。
+
+    列構成は _parse_lots_from_text と同じ:
+      0: 銘柄コード, 1: 銘柄名, 4: 取引種別, 5: 約定日, 6: 受渡日,
+      9: 売却/受取金額, 10: 取得費, 12: 損益, 13: 取得日
+    税行:
+      0 or 1: 税ラベル, 6: 受渡日, 11: 所得税, 12: 住民税
+
+    戻り値: {"updated": N, "unmatched": N}
+    """
+    # pending: 直近の取引行グループ（同一受渡日）
+    pending: list[dict] = []
+    lots_with_tax: list[dict] = []
+
+    def flush() -> None:
+        for t in pending:
+            lots_with_tax.append(t)
+        pending.clear()
+
+    current_year = None
+
+    for row in _csv.reader(text.splitlines()):
+        while len(row) < 15:
+            row.append("")
+        c0, c1 = row[0].strip(), row[1].strip()
+
+        # 年ヘッダー行
+        m = _re.match(r"^(\d{4})$", c0)
+        if m and not row[4].strip():
+            flush()
+            current_year = int(m.group(1))
+            continue
+
+        # total行
+        if _re.match(r"^.+total$", c0, _re.IGNORECASE):
+            flush()
+            continue
+
+        # 税/還付ラベル行を判定
+        tax_label = c0 if c0 in _TAX_LABELS else (c1 if c1 in _TAX_LABELS else None)
+
+        if tax_label:
+            if tax_label in _TAX_LABELS_SKIP:
+                continue
+            # 税行の受渡日は c6 または c5 に入るCSVレイアウトの揺れに対応する
+            settle = _parse_date_tokutei(row[6].strip()) or _parse_date_tokutei(row[5].strip())
+            natl   = _parse_int_tokutei(row[11].strip())
+            local  = _parse_int_tokutei(row[12].strip())
+            tax_amt = natl + local
+            if tax_amt == 0:
+                continue
+
+            if tax_label in _TAX_LABELS_SALE:
+                targets = [t for t in pending if t["settle"] == settle
+                           and t["trade_type"] in _SELL_TRADE_TYPES]
+            else:
+                targets = [t for t in pending if t["settle"] == settle
+                           and t["trade_type"] in _DIV_TRADE_TYPES]
+
+            if not targets:
+                continue
+
+            # 損益の絶対値で按分
+            total_w = sum(abs(t["pl"]) for t in targets) or len(targets)
+            allocated = 0
+            for i, t in enumerate(targets):
+                if i == len(targets) - 1:
+                    share = tax_amt - allocated
+                else:
+                    w = abs(t["pl"]) if total_w > 0 else 1
+                    share = int(tax_amt * w / total_w)
+                    allocated += share
+                t["tax"] += share
+            continue
+
+        # ヘッダー行・空行・年未確定行をスキップ
+        if c1 == "銘柄" or not c1:
+            continue
+        if current_year is None:
+            continue
+
+        c4  = row[4].strip()   # 取引種別
+        c5  = row[5].strip()   # 約定日
+        c6  = row[6].strip()   # 受渡日
+        c9  = row[9].strip()   # 売却/受取金額
+        c10 = row[10].strip()  # 取得費
+        c12 = row[12].strip()  # 損益
+        c13 = row[13].strip()  # 取得日
+
+        if not c4 or not c12:
+            continue
+        if c4 not in _TRADE_TYPE_MAP:
+            continue
+
+        try:
+            pl = int(c12.replace(",", ""))
+        except ValueError:
+            continue
+
+        trade_date = _parse_date_tokutei(c5) or _parse_date_tokutei(c6)
+        settle = _parse_date_tokutei(c6)
+        if not trade_date:
+            continue
+
+        # 受渡日が変わったらバッファをフラッシュ
+        if pending and pending[-1]["settle"] != settle:
+            flush()
+
+        pending.append({
+            "ticker": c1,
+            "trade_date": trade_date,
+            "settle": settle,
+            "sale": _parse_int_tokutei(c9),
+            "cost": _parse_int_tokutei(c10),
+            "acq_date": _parse_date_tokutei(c13),
+            "pl": pl,
+            "trade_type": c4,
+            "tax": 0,
+        })
+
+    flush()
+
+    with_tax = [t for t in lots_with_tax if t["tax"] != 0]
+    updated = 0
+    unmatched = 0
+
+    with get_db() as conn:
+        for lot in with_tax:
+            # まず acq_date で厳密マッチ
+            rows = conn.execute(
+                """SELECT id FROM transactions
+                   WHERE account_type='特定口座' AND ticker_name=? AND trade_date=?
+                     AND sale_amount=? AND cost_amount=? AND acq_date=?""",
+                (lot["ticker"], lot["trade_date"], lot["sale"], lot["cost"], lot["acq_date"]),
+            ).fetchall()
+            # フォールバック: profit_loss で照合
+            if not rows:
+                rows = conn.execute(
+                    """SELECT id FROM transactions
+                       WHERE account_type='特定口座' AND ticker_name=? AND trade_date=?
+                         AND sale_amount=? AND cost_amount=? AND profit_loss=?""",
+                    (lot["ticker"], lot["trade_date"], lot["sale"], lot["cost"], lot["pl"]),
+                ).fetchall()
+            if not rows:
+                unmatched += 1
+                continue
+            conn.execute(
+                "UPDATE transactions SET tax=? WHERE id=?",
+                (lot["tax"], rows[0][0]),
+            )
+            updated += 1
+
+    return {"updated": updated, "unmatched": unmatched}
+
+
 def import_holdings_csv(df: pd.DataFrame) -> dict:
     """保有銘柄をUPSERT（ticker_name + account_type が一致すれば値を更新）。"""
     missing = _HOLDING_REQUIRED_COLS - set(df.columns)
