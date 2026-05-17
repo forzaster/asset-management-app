@@ -536,6 +536,68 @@ def sync_tax_from_text(text: str) -> dict:
     return {"updated": updated, "unmatched": unmatched}
 
 
+def sync_refund_from_text(text: str) -> dict:
+    """CSVテキストから税金還付行を解析し、category='税金還付' レコードを再投入する。
+    既存の category='税金還付' をすべて削除してから再INSERT（冪等）。
+    戻り値: {"deleted": N, "inserted": N}
+    """
+    refunds = []
+    for row in _csv.reader(text.splitlines()):
+        if len(row) < 13:
+            row = row + [""] * (13 - len(row))
+        c0, c1 = row[0].strip(), row[1].strip()
+
+        label = None
+        if c0 in _REFUND_LABELS:
+            label = c0
+        elif c1 in _REFUND_LABELS:
+            label = c1
+        if not label:
+            continue
+
+        # 受渡日: col5 または col6（CSVレイアウトにより異なる）
+        settle = _parse_date_tokutei(row[5].strip() if len(row) > 5 else "")
+        if not settle:
+            settle = _parse_date_tokutei(row[6].strip() if len(row) > 6 else "")
+        if not settle:
+            continue
+
+        natl  = _parse_int_tokutei(row[11].strip() if len(row) > 11 else "")
+        local = _parse_int_tokutei(row[12].strip() if len(row) > 12 else "")
+        amt = natl + local
+        if amt == 0:
+            continue
+
+        refunds.append({
+            "trade_date": settle,
+            "trade_type": label,
+            "profit_type": label,
+            "profit_loss": amt,
+            "year": int(settle[:4]),
+            "month": int(settle[5:7]),
+        })
+
+    with get_db() as conn:
+        cur = conn.execute("DELETE FROM transactions WHERE category='税金還付'")
+        deleted = cur.rowcount
+        inserted = 0
+        for r in refunds:
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO transactions
+                   (account_type, ticker_code, ticker_name, trade_date, trade_type, profit_type,
+                    quantity, sale_amount, cost_amount, profit_loss, tax, category, year, month, acq_date)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ("特定口座", "", r["trade_type"], r["trade_date"],
+                 r["trade_type"], r["profit_type"],
+                 "", 0, 0, r["profit_loss"], 0,
+                 "税金還付", r["year"], r["month"], ""),
+            )
+            if cur.rowcount:
+                inserted += 1
+
+    return {"deleted": deleted, "inserted": inserted}
+
+
 def import_holdings_csv(df: pd.DataFrame) -> dict:
     """保有銘柄をUPSERT（ticker_name + account_type が一致すれば値を更新）。"""
     missing = _HOLDING_REQUIRED_COLS - set(df.columns)

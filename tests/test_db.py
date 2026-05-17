@@ -8,6 +8,7 @@ from core.db import (
     import_holdings_csv,
     import_tokutei_csv_text,
     import_transactions_csv,
+    sync_refund_from_text,
     sync_tax_from_text,
 )
 
@@ -193,3 +194,23 @@ def test_sync_tax_from_text_idempotent(tmp_db: object) -> None:
     sync_tax_from_text(SAMPLE_TAX_CSV)
     result2 = sync_tax_from_text(SAMPLE_TAX_CSV)
     assert result2["updated"] >= 0
+
+
+# ── sync_refund_from_text ─────────────────────────────────────────────────────
+
+SAMPLE_REFUND_CSV = """\
+2024,,,,,,,,,,,,,,
+,銘柄,,,,,,,,,,,,,
+譲渡益税還付金,,,,,2024/03/20,,,,,,12345,2469,,
+""".lstrip()
+
+
+def test_sync_refund_from_text_inserts(tmp_db: object) -> None:
+    result = sync_refund_from_text(SAMPLE_REFUND_CSV)
+    assert result["inserted"] >= 1
+
+
+def test_sync_refund_from_text_idempotent(tmp_db: object) -> None:
+    sync_refund_from_text(SAMPLE_REFUND_CSV)
+    result2 = sync_refund_from_text(SAMPLE_REFUND_CSV)
+    assert result2["inserted"] >= 1  # 削除して再投入なので毎回1以上
