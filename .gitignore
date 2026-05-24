@@ -1,23 +1,44 @@
 # Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+**/__pycache__/
+**/*.py[oc]
+**/build/
+**/dist/
+**/wheels/
+**/*.egg-info
 
 # Virtual environments
-.venv
+**/.venv
 
 # docs
-docs/plans/*
+docs/plans/
+docs/superpowers/
 
 # DB
 **/*.db
 
 # 個人データ（CSVエクスポート・データ修正スクリプト）
-exports/
-scripts/
+python/exports/
+python/exports_backup/
+python/scripts/
+python/src/scripts/*
+!python/src/scripts/__init__.py
+!python/src/scripts/export_csv.py
+!python/src/scripts/export_apple_zip.py
+python/state.xlsx/
+python/state_data/
+
+# Apple build artifacts
+apple/**/build/
+apple/**/.build/
+apple/**/DerivedData/
+apple/**/*.xcuserstate
+apple/**/xcuserdata/
+apple/**/.swiftpm/
+apple/**/.DS_Store
+apple/**/Package.resolved
+
+# Reports
+docs/reports/
 
 # Claude Code
 .claude/

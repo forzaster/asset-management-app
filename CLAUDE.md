@@ -1,126 +1,67 @@
-# CLAUDE.md
+# CLAUDE.md (root)
 
-## プロジェクト概要
+asset-management は **Streamlit版（Python）** と **Apple版（Mac/iPad/iPhone, SwiftUI）** の2つの実装を持つマルチプラットフォーム構成です。
 
-株式・投資信託・NISA・外国株ETFの売買・配当履歴を管理し、損益を可視化するローカル動作Webアプリ。
+## ディレクトリ
 
-- フレームワーク: Streamlit（`st.navigation` マルチページ構成）
-- DB: SQLite（`assets.db`）
-- パッケージ管理: **uv**（`pip` は使わない）
-- チャート: Plotly Express / Graph Objects
-- 株価取得: yfinance
+| パス | 内容 | 詳細ルール |
+|------|------|------------|
+| `python/` | 既存Streamlit版 | `python/CLAUDE.md` |
+| `apple/`  | Apple SwiftUI版  | `apple/CLAUDE.md` |
+| `docs/`   | 仕様・設計・実装プラン | `docs/superpowers/specs/`, `docs/superpowers/plans/`, `docs/plans/` |
 
-## 開発フロー
+## 作業時のルール
 
-### 1. Plan を立てる
+- `python/` 配下を触る場合は `python/CLAUDE.md` を必ず参照
+- `apple/` 配下を触る場合は `apple/CLAUDE.md` を必ず参照
+- 両方をまたぐ作業（例: データ互換性・CSV import/exportのスキーマ）の場合は両方を参照
 
-実装前に必ず計画を `docs/plans/` に Markdown ファイルとして出力し、**ユーザーの確認を得てから実装を開始する**。
+## データの流れ
 
 ```
-docs/plans/
-└── YYYYMMDD_<feature-name>.md
+Streamlit版（python/）
+  ├─ assets.db (SQLite)
+  └─ export ZIP → Apple版（apple/）が import
 ```
 
-Plan ファイルの構成：
+MVPでは Streamlit → Apple の片方向同期。将来的にiCloud Drive経由の双方向化を検討。
 
-```markdown
-# Plan: <機能名>
-
-## 目的
-何を解決するか
-
-## 変更対象ファイル
-- path/to/file.py — 変更内容の概要
-
-## 実装手順
-1. ...
-2. ...
-
-## 考慮事項 / トレードオフ
-- ...
-```
-
-### 2. 実装
-
-ユーザー確認後に実装する。
-
-### 3. レビュー
-
-実装後、動作確認の前に以下の観点でセルフレビューを行う。
-
-#### 関心の分離
-- [ ] UI（`pages/`）・ビジネスロジック（`core/`）・インフラ（DB・外部API）が適切に分離されているか
-- [ ] ページファイルにSQL・パースロジックが直書きされていないか
-- [ ] `core/db.py` を経由せずに DB へ直接接続していないか
-
-#### 個人情報・機密情報
-- [ ] 実名・口座番号・証券コードなどの個人情報がハードコードされていないか
-- [ ] ログ・エラーメッセージに取引金額や保有数量が出力されていないか
-- [ ] `state.xlsx/` 配下のソースデータをコードに直書きしていないか
-- [ ] **ユーザーが保有・取引した銘柄名・銘柄コード・口座種別などをコード内にハードコードしていないか**（マッピングテーブル・定数・コメント等いかなる形でも禁止。汎用ロジックで対応できない場合はユーザー設定ファイルや DB で管理する）
-
-#### データ保全
-- [ ] 既存の `assets.db` データが意図せず削除・上書きされないか
-- [ ] インポート処理（`import_html.py`）は冪等か（再実行しても重複しないか）
-- [ ] 保有銘柄の編集（settings.py）で保存前にバリデーションしているか
-
-#### マイグレーション
-- [ ] DBスキーマを変更した場合、既存の `assets.db` を壊さないか
-- [ ] カラム追加は `ALTER TABLE` または `CREATE TABLE IF NOT EXISTS` で対応できるか
-- [ ] 破壊的変更（カラム削除・型変更）が必要なら、`scripts/import_html.py` の再実行で再構築できるか確認する
-
-### 4. 動作確認
-
-- `uv run python3 -m py_compile <file>` で構文チェック
-- クエリや関数は `uv run python3 -c "..."` で単体テスト
-- Streamlit アプリは `uv run streamlit run app.py` で起動確認
-
-## コマンド
+## 起動コマンド要約
 
 ```bash
-# 依存関係インストール
-uv sync
+# Streamlit版
+cd python && uv run streamlit run src/app.py
 
-# DBデータをCSVエクスポート（exports/ に出力）
-uv run python src/scripts/export_csv.py
-
-# アプリ起動
-uv run streamlit run src/app.py
+# Apple版（Xcodeで開く）
+open apple/AssetManagement.xcodeproj
 ```
 
-## ディレクトリ構成
+## 開発フロー（両プラットフォーム共通）
 
-```
-.
-├── pyproject.toml
-├── assets.db                 # SQLite DB（自動生成）
-├── exports/                  # CSVエクスポート出力先
-├── src/
-│   ├── app.py                # Streamlit エントリーポイント
-│   ├── core/
-│   │   └── db.py             # DB 接続・スキーマ・クエリ・インポート関数
-│   ├── pages/
-│   │   ├── home.py           # ホーム：KPI・保有銘柄・Fetch
-│   │   ├── profit_trend.py   # 利益推移：年次グラフ
-│   │   ├── transactions.py   # 取引履歴：フィルター・CSV出力
-│   │   └── settings.py       # 設定：CSVインポート・保有銘柄編集
-│   └── scripts/
-│       └── export_csv.py     # DB → exports/ CSV出力
-└── docs/
-    └── plans/                # 実装計画ファイル置き場
-```
+1. 大きな変更は `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` に実装プランを作成し、ユーザー確認を得てから着手
+2. 実装後、動作確認前にセルフレビュー（各 `CLAUDE.md` のチェックリスト）
+3. テスト・動作確認後にコミット
 
-## DB スキーマ概要
+## レビューガイドライン（必須チェック項目）
 
-| テーブル | 主なカラム |
-|----------|-----------|
-| `transactions` | account_type, ticker_name, trade_date, profit_type, profit_loss, tax, category, year, month |
-| `holdings` | ticker_name, account_type, category, quantity, avg_cost, yf_ticker, last_price |
-| `portfolio_snapshots` | snapshot_date, total_assets, realized_cumulative, unrealized_gains |
+コード変更、コミット、PR、レビュー時には**必ず以下を確認**する。Apple/Python どちらのコードでも共通。
 
-## 実装上の注意
+### 機密情報・個人情報の混入チェック
 
-- 日本株の yfinance ティッカー: `{4桁コード}.T`
-- 投資信託は yfinance 非対応 → `yf_ticker` は空のまま
-- `@st.cache_data(ttl=300)` でDB読み取りをキャッシュ。DB更新後は `.clear()` を呼ぶ
-- パッケージ追加は `uv add <package>`、実行は `uv run <command>`
+- [ ] **実在の銘柄名・銘柄コード・口座種別** がコード／テストデータ／コメント／コミットメッセージにハードコードされていないか
+  - テストデータは "AAA" "BBB" "テスト銘柄A" 等の架空名・架空コードを使用すること
+  - マッピングテーブル・定数・コメント等いかなる形でも禁止
+- [ ] **実取引金額・保有数量・実勘定残高** がコード／ログ／コミットメッセージに含まれていないか
+- [ ] **個人を特定し得る情報**（氏名、口座番号、メールアドレス、電話番号等）が含まれていないか
+- [ ] `python/state.xlsx/`, `python/state_data/`, `python/exports/`, `python/scripts/` 配下のソースデータをコードに直書きしていないか
+- [ ] `assets.db` 等の実DBファイルがコミット対象に含まれていないか（`.gitignore` で除外されているか確認）
+- [ ] APIキー・トークン・パスワード等の認証情報が含まれていないか
+- [ ] エラーメッセージ・ログ出力で取引金額・保有数量・実銘柄名が出力されていないか
+
+汎用ロジックで対応できない場合は、ユーザー設定ファイルや DB で管理する。
+
+### コミットメッセージ
+
+- 機能の説明のみにとどめ、金額・銘柄名・口座情報を含めない
+- 例 OK: `feat: 還付金インポート機能を追加`
+- 例 NG: `feat: 還付金 123,456円を ABC証券から取り込み`
