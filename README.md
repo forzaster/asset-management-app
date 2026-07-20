@@ -29,52 +29,60 @@
 ### インストール
 
 ```bash
-uv sync
+cd python && uv sync
 ```
 
 ### データインポート
 
-設定画面からCSVファイルをアップロードしてインポートします。
+データ管理画面からCSVファイルをアップロードしてインポートします。
 
-- `exports/transactions.csv` — 取引履歴
-- `exports/holdings.csv` — 保有銘柄
+- `python/exports/transactions.csv` — 取引履歴
+- `python/exports/holdings.csv` — 保有銘柄
 
 CSVエクスポート（現在のDBからバックアップ）:
 
 ```bash
-uv run python src/scripts/export_csv.py
+cd python && uv run python src/scripts/export_csv.py
 ```
 
 ### アプリ起動
 
 ```bash
-uv run streamlit run src/app.py
+cd python && uv run streamlit run src/app.py
 ```
 
 ブラウザで http://localhost:8501 を開く。
+
+## Apple版（SwiftUI / iOS / iPadOS / macOS）
+
+Mac/iPad/iPhoneネイティブアプリ。最小OS: iOS 17 / iPadOS 17 / macOS 14。
+
+```bash
+open apple/AssetManagement.xcodeproj
+# → Xcode UI で ⌘+R
+```
+
+詳細は `apple/CLAUDE.md` および `docs/superpowers/specs/2026-05-24-apple-app-design.md` 参照。
 
 ## ファイル構成
 
 ```
 .
-├── pyproject.toml
-├── assets.db                 # SQLiteデータベース（自動生成）
-├── exports/                  # CSVエクスポート出力先
-│   ├── transactions.csv
-│   └── holdings.csv
-├── src/
-│   ├── app.py                # Streamlitエントリーポイント
-│   ├── core/
-│   │   └── db.py             # DB接続・スキーマ・クエリ・インポート関数
-│   ├── pages/
-│   │   ├── home.py
-│   │   ├── profit_trend.py
-│   │   ├── transactions.py
-│   │   └── settings.py
-│   └── scripts/
-│       └── export_csv.py     # DB → CSVエクスポート
+├── python/                       # Streamlit版
+│   ├── pyproject.toml
+│   ├── assets.db                 # SQLiteデータベース（自動生成）
+│   ├── exports/                  # CSVエクスポート出力先
+│   └── src/
+│       ├── app.py                # Streamlitエントリーポイント
+│       ├── core/db.py            # DB接続・スキーマ・クエリ・インポート関数
+│       ├── pages/                # 4画面（home, profit_trend, transactions, settings）
+│       └── scripts/export_csv.py # DB → CSVエクスポート
+├── apple/                        # Apple SwiftUI版（実装予定）
 └── docs/
-    └── plans/                # 実装計画
+    ├── plans/                    # 実装計画（個人作業向け）
+    └── superpowers/
+        ├── specs/                # 設計仕様
+        └── plans/                # 詳細実装プラン
 ```
 
 ## データベース
