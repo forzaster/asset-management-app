@@ -14,6 +14,18 @@ public struct AnnualSummary: Sendable, Equatable {
     }
 }
 
+public struct YearProfitTypeSummary: Sendable, Equatable {
+    public var year: Int
+    public var profitType: String
+    public var amount: Int
+
+    public init(year: Int, profitType: String, amount: Int) {
+        self.year = year
+        self.profitType = profitType
+        self.amount = amount
+    }
+}
+
 public struct CategoryYearSummary: Sendable, Equatable {
     public var year: Int
     public var category: String

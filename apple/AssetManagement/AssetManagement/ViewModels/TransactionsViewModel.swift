@@ -60,11 +60,11 @@ final class TransactionsViewModel {
     var byCategory: [(category: String, profit: Int)] {
         Dictionary(grouping: filtered, by: { $0.category })
             .map { ($0.key, $0.value.reduce(0) { $0 + $1.profitLoss }) }
-            .sorted { $0.1 < $1.1 }
+            .sorted { $0.1 > $1.1 }
     }
     var byTicker: [(name: String, profit: Int)] {
         Dictionary(grouping: filtered, by: { $0.tickerName })
             .map { ($0.key, $0.value.reduce(0) { $0 + $1.profitLoss }) }
-            .sorted { $0.1 < $1.1 }
+            .sorted { $0.1 > $1.1 }
     }
 }

@@ -5,6 +5,7 @@ import AssetCore
 struct TransactionsView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var vm: TransactionsViewModel?
+    @State private var selectedTab: Int = 0
 
     var body: some View {
         Group {
@@ -22,15 +23,23 @@ struct TransactionsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 summary(vm)
                 filterSection(vm)
-                listSection(vm)
-                chartSection(vm)
+                Picker("表示", selection: $selectedTab) {
+                    Text("取引履歴").tag(0)
+                    Text("損益内訳").tag(1)
+                }
+                .pickerStyle(.segmented)
+                if selectedTab == 0 {
+                    listSection(vm)
+                } else {
+                    chartSection(vm)
+                }
             }
             .padding()
         }
     }
 
     private func summary(_ vm: TransactionsViewModel) -> some View {
-        HStack {
+        VStack(spacing: 12) {
             KPICard(title: "件数", value: "\(vm.filtered.count)")
             KPICard(title: "損益合計", value: "¥\(formatInt(vm.totalProfit))")
             KPICard(title: "税金合計", value: "¥\(formatInt(vm.totalTax))")
@@ -113,6 +122,7 @@ struct TransactionsView: View {
                 )
                 .foregroundStyle(item.profit >= 0 ? .blue : .red)
             }
+            .yenAxisX()
             .frame(height: CGFloat(max(150, vm.byCategory.count * 30)))
 
             Text("銘柄別").font(.headline).padding(.top)
@@ -123,6 +133,7 @@ struct TransactionsView: View {
                 )
                 .foregroundStyle(item.profit >= 0 ? .blue : .red)
             }
+            .yenAxisX()
             .frame(height: CGFloat(max(200, vm.byTicker.count * 22)))
         }
     }
