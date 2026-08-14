@@ -29,6 +29,24 @@ public final class SQLiteAnnualAggregatesRepository: AnnualAggregatesRepository,
         }
     }
 
+    public func byYearAndProfitType() async throws -> [YearProfitTypeSummary] {
+        try await reader.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT year, profit_type, SUM(profit_loss) AS amount
+                FROM transactions
+                GROUP BY year, profit_type
+                ORDER BY year, profit_type
+            """)
+            return rows.map { row in
+                YearProfitTypeSummary(
+                    year: row["year"] ?? 0,
+                    profitType: row["profit_type"] ?? "",
+                    amount: row["amount"] as Int? ?? 0
+                )
+            }
+        }
+    }
+
     public func byYearAndCategory() async throws -> [CategoryYearSummary] {
         try await reader.read { db in
             let rows = try Row.fetchAll(db, sql: """

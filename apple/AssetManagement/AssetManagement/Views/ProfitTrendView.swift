@@ -34,15 +34,18 @@ struct ProfitTrendView: View {
             Chart(vm.annual, id: \.year) { item in
                 BarMark(
                     x: .value("年", String(item.year)),
-                    y: .value("損益(税引前)", item.totalProfit)
+                    y: .value("金額", item.totalProfit)
                 )
-                .foregroundStyle(item.totalProfit >= 0 ? .blue : .red)
+                .foregroundStyle(by: .value("種類", "損益"))
                 BarMark(
                     x: .value("年", String(item.year)),
-                    y: .value("税金", -item.totalTax)
+                    y: .value("金額", -item.totalTax)
                 )
-                .foregroundStyle(.pink.opacity(0.5))
+                .foregroundStyle(by: .value("種類", "税金"))
             }
+            .chartForegroundStyleScale(["損益": .blue, "税金": .pink.opacity(0.7)])
+            .chartLegend(position: .bottom, alignment: .center)
+            .yenAxisY()
             .frame(height: 250)
         }
     }
@@ -53,16 +56,19 @@ struct ProfitTrendView: View {
             Chart(vm.cumulative, id: \.year) { item in
                 LineMark(
                     x: .value("年", String(item.year)),
-                    y: .value("累積(税引前)", item.gross)
+                    y: .value("累積", item.gross)
                 )
-                .foregroundStyle(.blue)
+                .foregroundStyle(by: .value("種類", "税引前"))
                 LineMark(
                     x: .value("年", String(item.year)),
-                    y: .value("累積(税引後)", item.net)
+                    y: .value("累積", item.net)
                 )
-                .foregroundStyle(.red)
+                .foregroundStyle(by: .value("種類", "税引後"))
                 .lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 4]))
             }
+            .chartForegroundStyleScale(["税引前": .blue, "税引後": .red])
+            .chartLegend(position: .bottom, alignment: .center)
+            .yenAxisY()
             .frame(height: 250)
         }
     }
@@ -71,14 +77,28 @@ struct ProfitTrendView: View {
         VStack(alignment: .leading) {
             Text("年次サマリー").font(.headline)
             ForEach(vm.annual, id: \.year) { item in
-                HStack {
-                    Text(String(item.year)).frame(width: 60, alignment: .leading)
-                    Spacer()
-                    ProfitLossText(amount: item.totalProfit)
-                    Text("税金: ¥\(format(item.totalTax))").foregroundStyle(.secondary).font(.caption)
-                    ProfitLossText(amount: item.netProfit)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(String(item.year)).frame(width: 60, alignment: .leading)
+                        Spacer()
+                        ProfitLossText(amount: item.totalProfit)
+                        Text("税金: ¥\(format(item.totalTax))").foregroundStyle(.secondary).font(.caption)
+                        ProfitLossText(amount: item.netProfit)
+                    }
+                    .font(.callout)
+
+                    let breakdown = vm.profitTypeBreakdown(for: item.year)
+                    if !breakdown.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(breakdown, id: \.profitType) { b in
+                                Text("\(b.profitType): ¥\(format(b.amount))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.leading, 60)
+                    }
                 }
-                .font(.callout)
                 Divider()
             }
         }

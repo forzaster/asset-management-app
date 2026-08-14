@@ -43,8 +43,7 @@ struct HomeView: View {
     }
 
     private func kpiRow(_ snap: PortfolioSnapshot) -> some View {
-        let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
-        return LazyVGrid(columns: columns, spacing: 12) {
+        VStack(spacing: 12) {
             KPICard(title: "総資産", value: yen(snap.totalAssets))
             KPICard(title: "実現損益累計", value: yen(snap.realizedCumulative))
             KPICard(title: "含み損益", value: yen(snap.unrealizedGains))
@@ -52,10 +51,23 @@ struct HomeView: View {
     }
 
     private func holdingList(_ items: [Holding]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let grouped = Dictionary(grouping: items) {
+            GroupKey(accountType: $0.accountType, category: $0.category)
+        }
+        let keys = AccountGroupOrder.sortedKeys(Set(grouped.keys))
+        return VStack(alignment: .leading, spacing: 16) {
             Text("保有銘柄 (\(items.count))").font(.headline)
-            ForEach(items) { h in
-                holdingRow(h)
+            ForEach(keys, id: \.self) { key in
+                let rows = grouped[key] ?? []
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("\(key.displayLabel) (\(rows.count))")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(rows) { h in
+                        holdingRow(h)
+                    }
+                }
+                .padding(.top, 8)
             }
         }
     }
