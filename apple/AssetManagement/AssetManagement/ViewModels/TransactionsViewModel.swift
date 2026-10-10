@@ -1,5 +1,8 @@
 import Foundation
 import AssetCore
+import os
+
+private let logger = Logger(subsystem: "AssetManagement", category: "TransactionsViewModel")
 
 @MainActor
 @Observable
@@ -40,7 +43,8 @@ final class TransactionsViewModel {
             if selectedTradeTypes.isEmpty { selectedTradeTypes = Set(tradeTypes) }
             applyFilter()
         } catch {
-            print("load error: \(error)")
+            // エラー本文には銘柄名・金額が含まれ得るため型名のみ記録する
+            logger.error("load error: \(String(describing: type(of: error)), privacy: .public)")
         }
     }
 

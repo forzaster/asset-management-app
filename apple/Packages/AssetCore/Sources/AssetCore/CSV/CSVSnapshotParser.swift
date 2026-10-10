@@ -19,7 +19,7 @@ public enum CSVSnapshotParser {
         do {
             reader = try CSVReader(input: stripped) { $0.headerStrategy = .firstLine }
         } catch {
-            throw ImportError.csvParseFailed(file: "snapshots.csv", reason: String(describing: error))
+            throw ImportError.csvParseFailed(file: "snapshots.csv", reason: "unreadable CSV")
         }
         let header = reader.headers
         guard !header.isEmpty else {
@@ -29,13 +29,16 @@ public enum CSVSnapshotParser {
             throw ImportError.csvParseFailed(file: "snapshots.csv", reason: "missing column: \(col)")
         }
         var result: [PortfolioSnapshot] = []
+        // エラー理由にはセル値を含めず行番号のみを入れる（金額・銘柄名の漏洩防止）
+        var rowNumber = 1
         do {
             while let row = try reader.readRow() {
+                rowNumber += 1
                 let dict = Dictionary(uniqueKeysWithValues: zip(header, row).map { ($0, $1) })
                 let dateStr = dict["snapshot_date"] ?? ""
                 guard let date = dateFormatter.date(from: dateStr) else {
                     throw ImportError.csvParseFailed(file: "snapshots.csv",
-                                                     reason: "invalid date: \(dateStr)")
+                                                     reason: "invalid snapshot_date at line \(rowNumber)")
                 }
                 result.append(PortfolioSnapshot(
                     id: nil, snapshotDate: date,
@@ -48,7 +51,7 @@ public enum CSVSnapshotParser {
         } catch let err as ImportError {
             throw err
         } catch {
-            throw ImportError.csvParseFailed(file: "snapshots.csv", reason: String(describing: error))
+            throw ImportError.csvParseFailed(file: "snapshots.csv", reason: "malformed row near line \(rowNumber + 1)")
         }
         return result
     }

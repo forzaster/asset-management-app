@@ -14,7 +14,7 @@ public enum CSVHoldingParser {
         do {
             reader = try CSVReader(input: stripped) { $0.headerStrategy = .firstLine }
         } catch {
-            throw ImportError.csvParseFailed(file: "holdings.csv", reason: String(describing: error))
+            throw ImportError.csvParseFailed(file: "holdings.csv", reason: "unreadable CSV")
         }
         let header = reader.headers
         guard !header.isEmpty else {
@@ -25,8 +25,11 @@ public enum CSVHoldingParser {
         }
 
         var result: [Holding] = []
+        // エラー理由にはセル値を含めず行番号のみを入れる（金額・銘柄名の漏洩防止）
+        var rowNumber = 1
         do {
             while let row = try reader.readRow() {
+                rowNumber += 1
                 let dict = Dictionary(uniqueKeysWithValues: zip(header, row).map { ($0, $1) })
                 let yfRaw = dict["yf_ticker"] ?? ""
                 let yf = yfRaw.isEmpty ? nil : yfRaw
@@ -49,7 +52,7 @@ public enum CSVHoldingParser {
         } catch let err as ImportError {
             throw err
         } catch {
-            throw ImportError.csvParseFailed(file: "holdings.csv", reason: String(describing: error))
+            throw ImportError.csvParseFailed(file: "holdings.csv", reason: "malformed row near line \(rowNumber + 1)")
         }
         return result
     }

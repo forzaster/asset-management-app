@@ -1,5 +1,8 @@
 import Foundation
 import AssetCore
+import os
+
+private let logger = Logger(subsystem: "AssetManagement", category: "ProfitTrendViewModel")
 
 @MainActor
 @Observable
@@ -28,7 +31,8 @@ final class ProfitTrendViewModel {
                 return (a.year, gross, net)
             }
         } catch {
-            print("load error: \(error)")
+            // エラー本文には銘柄名・金額が含まれ得るため型名のみ記録する
+            logger.error("load error: \(String(describing: type(of: error)), privacy: .public)")
         }
         isLoading = false
     }
