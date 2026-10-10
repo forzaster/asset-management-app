@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from core.db import (
+    CSVFormatError,
     fill_ticker_codes_from_text,
     get_db,
     import_holdings_csv,
@@ -112,8 +113,11 @@ if tx_file is not None:
                 result = import_transactions_csv(df_tx)
             st.success(f"完了 — 追加 {result['inserted']:,} 件 / スキップ（重複） {result['skipped']:,} 件")
             st.cache_data.clear()
-        except ValueError as e:
+        except CSVFormatError as e:
             st.error(f"フォーマットエラー: {e}")
+        except Exception as e:
+            # 例外メッセージにはCSVのセル値（金額・銘柄名）が含まれ得るため表示しない
+            st.error(f"インポートに失敗しました（{type(e).__name__}）。CSVの形式を確認してください。")
 
 st.divider()
 
@@ -144,8 +148,11 @@ if h_file is not None:
                 result = import_holdings_csv(df_h_upload)
             st.success(f"完了 — {result['upserted']:,} 件を更新しました")
             st.cache_data.clear()
-        except ValueError as e:
+        except CSVFormatError as e:
             st.error(f"フォーマットエラー: {e}")
+        except Exception as e:
+            # 例外メッセージにはCSVのセル値（金額・銘柄名）が含まれ得るため表示しない
+            st.error(f"インポートに失敗しました（{type(e).__name__}）。CSVの形式を確認してください。")
 
 st.divider()
 

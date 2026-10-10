@@ -24,7 +24,7 @@ public enum CSVTransactionParser {
                 $0.headerStrategy = .firstLine
             }
         } catch {
-            throw ImportError.csvParseFailed(file: "transactions.csv", reason: String(describing: error))
+            throw ImportError.csvParseFailed(file: "transactions.csv", reason: "unreadable CSV")
         }
 
         let header = reader.headers
@@ -36,13 +36,16 @@ public enum CSVTransactionParser {
         }
 
         var result: [Transaction] = []
+        // エラー理由にはセル値を含めず行番号のみを入れる（金額・銘柄名の漏洩防止）
+        var rowNumber = 1
         do {
             while let row = try reader.readRow() {
+                rowNumber += 1
                 let dict = Dictionary(uniqueKeysWithValues: zip(header, row).map { ($0, $1) })
                 let tradeDateStr = dict["trade_date"] ?? ""
                 guard let tradeDate = dateFormatter.date(from: tradeDateStr) else {
                     throw ImportError.csvParseFailed(file: "transactions.csv",
-                                                     reason: "invalid trade_date: \(tradeDateStr)")
+                                                     reason: "invalid trade_date at line \(rowNumber)")
                 }
                 result.append(Transaction(
                     id: nil,
@@ -66,7 +69,7 @@ public enum CSVTransactionParser {
         } catch let err as ImportError {
             throw err
         } catch {
-            throw ImportError.csvParseFailed(file: "transactions.csv", reason: String(describing: error))
+            throw ImportError.csvParseFailed(file: "transactions.csv", reason: "malformed row near line \(rowNumber + 1)")
         }
         return result
     }

@@ -160,7 +160,8 @@ if fetch:
                 df_hold = load_holdings()
                 st.success(f"{len(prices)}銘柄の株価を更新しました（{now_str}）")
             except Exception as e:
-                st.error(f"取得失敗: {e}")
+                # 例外メッセージには保有ティッカーが含まれ得るため型名のみ表示
+                st.error(f"取得失敗（{type(e).__name__}）")
     else:
         st.info("yfinanceティッカーが設定されている銘柄がありません")
 

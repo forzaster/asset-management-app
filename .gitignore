@@ -13,8 +13,20 @@
 docs/plans/
 docs/superpowers/
 
-# DB
+# DB（SQLiteのWAL/SHM/ジャーナル含む）
 **/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/*.sqlite3
+
+# 個人データになり得るファイル（場所を問わず除外）
+**/*.csv
+**/*.zip
+**/*.xlsx
+**/*.xls
+**/.env
+**/.env.*
 
 # 個人データ（CSVエクスポート・データ修正スクリプト）
 python/exports/
@@ -24,7 +36,7 @@ python/src/scripts/*
 !python/src/scripts/__init__.py
 !python/src/scripts/export_csv.py
 !python/src/scripts/export_apple_zip.py
-python/state.xlsx/
+python/state.xlsx
 python/state_data/
 
 # Apple build artifacts

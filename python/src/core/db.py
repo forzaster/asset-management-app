@@ -19,6 +19,10 @@ def _s(v, default: str = "") -> str:
     return str(v)
 
 
+class CSVFormatError(ValueError):
+    """CSVの形式エラー。メッセージにはカラム名など値を含まない情報のみを入れる。"""
+
+
 _TX_REQUIRED_COLS = {
     "account_type", "ticker_code", "ticker_name", "trade_date",
     "trade_type", "profit_type", "quantity",
@@ -149,12 +153,12 @@ def import_transactions_csv(df: pd.DataFrame) -> dict:
     """差分インポート。重複キー一致行はスキップ。{'inserted': N, 'skipped': M} を返す。"""
     missing = _TX_REQUIRED_COLS - set(df.columns)
     if missing:
-        raise ValueError(f"CSVに必須カラムがありません: {missing}")
+        raise CSVFormatError(f"CSVに必須カラムがありません: {missing}")
 
     df = df.copy()
     df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce").dt.strftime("%Y-%m-%d")
     if df["trade_date"].isna().any():
-        raise ValueError("trade_date に変換できない値があります（形式: YYYY-MM-DD）")
+        raise CSVFormatError("trade_date に変換できない値があります（形式: YYYY-MM-DD）")
     df["year"] = pd.to_datetime(df["trade_date"]).dt.year
     df["month"] = pd.to_datetime(df["trade_date"]).dt.month
 
@@ -644,7 +648,7 @@ def import_holdings_csv(df: pd.DataFrame) -> dict:
     """保有銘柄をUPSERT（ticker_name + account_type が一致すれば値を更新）。"""
     missing = _HOLDING_REQUIRED_COLS - set(df.columns)
     if missing:
-        raise ValueError(f"CSVに必須カラムがありません: {missing}")
+        raise CSVFormatError(f"CSVに必須カラムがありません: {missing}")
 
     with get_db() as conn:
         conn.executemany(
